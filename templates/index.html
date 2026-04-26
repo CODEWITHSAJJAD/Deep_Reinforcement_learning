@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Number Classifier</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container {
+            max-width: 600px;
+            margin-top: 50px;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
+            border: none;
+        }
+        .card-header {
+            background-color: #4e73df;
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background-color: #4e73df;
+            border: none;
+            padding: 10px 25px;
+        }
+        .btn-primary:hover {
+            background-color: #3a5bbf;
+        }
+        #audioVisualizer {
+            width: 100%;
+            height: 100px;
+            background-color: #f1f3f9;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        #resultContainer {
+            display: none;
+            margin-top: 20px;
+            animation: fadeIn 0.5s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .progress {
+            height: 20px;
+            margin-top: 10px;
+        }
+        .confidence-bar {
+            transition: width 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="card-header text-center">
+                <h3>Number Audio Classifier</h3>
+                <p class="mb-0">Upload an audio file saying "zero", "two", "six", "eight", or "nine"</p>
+            </div>
+            <div class="card-body">
+                <form id="audioForm">
+                    <div class="mb-3">
+                        <label for="audioFile" class="form-label">Choose audio file</label>
+                        <input class="form-control" type="file" id="audioFile" accept="audio/*" required>
+                    </div>
+                    <div id="audioVisualizer"></div>
+                    <button type="submit" class="btn btn-primary w-100">Classify Audio</button>
+                </form>
+
+                <div id="resultContainer" class="text-center">
+                    <h4>Prediction Result</h4>
+                    <div id="predictionResult" class="mb-3"></div>
+                    <div id="confidenceBars"></div>
+                    <audio id="audioPlayer" controls class="w-100 mt-3"></audio>
+                </div>
+
+                <div id="loadingSpinner" class="text-center mt-3" style="display: none;">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Processing your audio...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/wavesurfer.js"></script>
+    <script>
+        // Initialize WaveSurfer for audio visualization
+        const wavesurfer = WaveSurfer.create({
+            container: '#audioVisualizer',
+            waveColor: '#4e73df',
+            progressColor: '#2e59d9',
+            cursorWidth: 0,
+            barWidth: 2,
+            barRadius: 3,
+            height: 80
+        });
+
+        // Handle file selection
+        const audioFileInput = document.getElementById('audioFile');
+        audioFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const audioPlayer = document.getElementById('audioPlayer');
+                const url = URL.createObjectURL(file);
+                wavesurfer.load(url);
+                audioPlayer.src = url;
+            }
+        });
+
+        // Handle form submission
+        document.getElementById('audioForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const file = audioFileInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('audio', file);
+
+            // Show loading spinner
+            document.getElementById('loadingSpinner').style.display = 'block';
+            document.getElementById('resultContainer').style.display = 'none';
+
+            fetch('/predict', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Display results
+                const resultContainer = document.getElementById('resultContainer');
+                const predictionResult = document.getElementById('predictionResult');
+                const confidenceBars = document.getElementById('confidenceBars');
+
+                predictionResult.innerHTML = `
+                    <div class="alert alert-success">
+                        The audio is classified as: <strong>${data.class}</strong>
+                        with confidence: <strong>${(data.confidence * 100).toFixed(2)}%</strong>
+                    </div>
+                `;
+
+                // Create confidence bars for all classes
+                confidenceBars.innerHTML = '';
+                const classes = ['eight', 'nine', 'six', 'two', 'zero'];
+                classes.forEach(cls => {
+                    const confidence = data.confidences ? (data.confidences[cls] * 100).toFixed(2) :
+                                      (cls === data.class ? (data.confidence * 100).toFixed(2) : '0.00');
+
+                    const barContainer = document.createElement('div');
+                    barContainer.className = 'mb-2';
+                    barContainer.innerHTML = `
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>${cls.charAt(0).toUpperCase() + cls.slice(1)}</span>
+                            <span>${confidence}%</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar confidence-bar ${cls === data.class ? 'bg-success' : 'bg-secondary'}"
+                                 role="progressbar" style="width: ${confidence}%"
+                                 aria-valuenow="${confidence}" aria-valuemin="0" aria-valuemax="100">
+                            </div>
+                        </div>
+                    `;
+                    confidenceBars.appendChild(barContainer);
+                });
+
+                resultContainer.style.display = 'block';
+                document.getElementById('loadingSpinner').style.display = 'none';
+            })
+            .catch(error => {
+                document.getElementById('resultContainer').innerHTML = `
+                    <div class="alert alert-danger">Error: ${error.message}</div>
+                `;
+                document.getElementById('resultContainer').style.display = 'block';
+                document.getElementById('loadingSpinner').style.display = 'none';
+            });
+        });
+    </script>
+</body>
+</html>
